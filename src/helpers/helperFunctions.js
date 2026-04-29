@@ -6,10 +6,6 @@ export function determineAgeGroup(age) {
   return "senior";
 }
 
-/**
- * Builds the total_pages + links block for paginated responses.
- * Preserves all existing query params, only swaps out `page`.
- */
 export function constructLinks(req, page, limit, total) {
   const total_pages = Math.ceil(total / limit);
   const base = req.baseUrl + req.path;

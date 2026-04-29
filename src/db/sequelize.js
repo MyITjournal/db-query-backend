@@ -43,15 +43,23 @@ sequelize.define(
 sequelize.define(
   "user",
   {
-    id:            { type: DataTypes.STRING(36), primaryKey: true },
-    github_id:     { type: DataTypes.STRING(50), allowNull: false, unique: true },
-    username:      { type: DataTypes.STRING(255), allowNull: false },
-    email:         DataTypes.STRING(255),
-    avatar_url:    DataTypes.STRING(500),
-    role:          { type: DataTypes.STRING(20), allowNull: false, defaultValue: "analyst" },
-    is_active:     { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    id: { type: DataTypes.STRING(36), primaryKey: true },
+    github_id: { type: DataTypes.STRING(50), allowNull: false, unique: true },
+    username: { type: DataTypes.STRING(255), allowNull: false },
+    email: DataTypes.STRING(255),
+    avatar_url: DataTypes.STRING(500),
+    role: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "analyst",
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
     last_login_at: DataTypes.DATE,
-    created_at:    { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   },
   { tableName: "users", timestamps: false },
 );
@@ -60,8 +68,8 @@ sequelize.define(
 sequelize.define(
   "refresh_token",
   {
-    jti:        { type: DataTypes.STRING(36), primaryKey: true },
-    user_id:    { type: DataTypes.STRING(36), allowNull: false },
+    jti: { type: DataTypes.STRING(36), primaryKey: true },
+    user_id: { type: DataTypes.STRING(36), allowNull: false },
     expires_at: { type: DataTypes.DATE, allowNull: false },
     created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   },
