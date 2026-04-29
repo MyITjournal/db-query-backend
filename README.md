@@ -310,13 +310,15 @@ All error responses follow the same structure:
 { "status": "error", "message": "<error description>" }
 ```
 
-| Status | Condition                           |
-| ------ | ----------------------------------- |
-| `400`  | Missing or empty required parameter |
-| `404`  | Profile not found                   |
-| `422`  | Invalid parameter type              |
-| `500`  | Server failure                      |
-| `502`  | Server failure                      |
+| Status | Condition                                                   |
+| ------ | ----------------------------------------------------------- |
+| `400`  | Missing or empty required parameter                         |
+| `401`  | Missing or invalid authentication token                     |
+| `403`  | Forbidden — insufficient role permissions                   |
+| `404`  | Profile not found                                           |
+| `422`  | Invalid parameter type (value present but fails validation) |
+| `500`  | Internal server error                                       |
+| `502`  | Upstream API failure (genderize / agify / nationalize)      |
 
 ---
 
@@ -338,6 +340,13 @@ Create a `.env` file in the project root:
 ```env
 DATABASE_URL=postgresql://postgres:your_password@localhost:5432/your_db_name
 DATABASE_SSL=false
+
+GITHUB_CLIENT_ID=your_github_app_client_id
+GITHUB_CLIENT_SECRET=your_github_app_client_secret
+GITHUB_CALLBACK_URL=http://localhost:3000/auth/github/callback
+
+JWT_ACCESS_SECRET=some_long_random_secret_32_plus_chars
+JWT_REFRESH_SECRET=another_long_random_secret_32_plus_chars
 ```
 
 ```bash
