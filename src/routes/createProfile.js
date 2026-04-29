@@ -1,33 +1,18 @@
-// This file is not active. It contains routes that were removed because the
-// current spec focuses on querying pre-seeded data only.
-//
-// Handlers preserved here:
-//   POST /   → createProfileHandler
-//   GET /:id → getProfileByIdHandler
-//   DELETE /:id → deleteProfileHandler
-
 import axios from "axios";
 import { v7 as uuidv7 } from "uuid";
 import {
   determineAgeGroup,
   handleUpstreamError,
   getCountryName,
+  formatProfile,
 } from "../helpers/helperFunctions.js";
-import { formatProfile } from "../helpers/helperFunctions.js";
-import {
-  createProfileRules,
-  profileIdRules,
-  handleValidationErrors,
-} from "../helpers/validators.js";
 import pool from "../db/index.js";
-
-//   router.post("/", createProfileRules, handleValidationErrors, createProfileHandler);
 
 export async function createProfileHandler(req, res) {
   const { name } = req.body;
 
   try {
-    //*Idempotency*
+    // Idempotency — return existing profile if name already exists
     const existing = await pool.query(
       `SELECT id, name, gender, gender_probability,
               age, age_group, country_id, country_name, country_probability, created_at
@@ -43,23 +28,16 @@ export async function createProfileHandler(req, res) {
       });
     }
 
-    const fetchGender = axios.get("https://api.genderize.io", {
-      params: { name },
-      timeout: 3500,
-    });
-    const fetchAge = axios.get("https://api.agify.io", {
-      params: { name },
-      timeout: 3500,
-    });
-    const fetchNationality = axios.get("https://api.nationalize.io", {
-      params: { name },
-      timeout: 3500,
-    });
-
     const [genderRes, ageRes, countryRes] = await Promise.allSettled([
-      fetchGender,
-      fetchAge,
-      fetchNationality,
+      axios.get("https://api.genderize.io", {
+        params: { name },
+        timeout: 3500,
+      }),
+      axios.get("https://api.agify.io", { params: { name }, timeout: 3500 }),
+      axios.get("https://api.nationalize.io", {
+        params: { name },
+        timeout: 3500,
+      }),
     ]);
 
     // Gender
@@ -160,9 +138,8 @@ export async function createProfileHandler(req, res) {
   }
 }
 
-//   router.get("/:id", profileIdRules, handleValidationErrors, getProfileByIdHandler);
 export async function getProfileByIdHandler(req, res) {
-  const id = req.params.id;
+  const { id } = req.params;
 
   try {
     const { rows } = await pool.query(
@@ -182,31 +159,7 @@ export async function getProfileByIdHandler(req, res) {
       status: "success",
       data: formatProfile(rows[0]),
     });
-  } catch (error) {
-    return res
-      .status(500)
-      .json({ status: "error", message: "Internal server error" });
-  }
-}
-
-//   router.delete("/:id", profileIdRules, handleValidationErrors, deleteProfileHandler);
-export async function deleteProfileHandler(req, res) {
-  const id = req.params.id;
-
-  try {
-    const { rowCount } = await pool.query(
-      "DELETE FROM db_profiles WHERE id = $1",
-      [id],
-    );
-
-    if (rowCount === 0) {
-      return res
-        .status(404)
-        .json({ status: "error", message: "Profile not found" });
-    }
-
-    return res.status(204).send();
-  } catch (error) {
+  } catch {
     return res
       .status(500)
       .json({ status: "error", message: "Internal server error" });

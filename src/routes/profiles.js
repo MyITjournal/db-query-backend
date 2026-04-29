@@ -1,12 +1,15 @@
 import { Router } from "express";
 import pool from "../db/index.js";
-import { formatProfile } from "../helpers/helperFunctions.js";
+import { formatProfile, constructLinks } from "../helpers/helperFunctions.js";
 import { parseNaturalLanguageQuery } from "../helpers/nlq.js";
 import {
   profilesListRules,
   searchRules,
+  createProfileRules,
   handleValidationErrors,
 } from "../helpers/validators.js";
+import { authorize } from "../middleware/authorize.js";
+import { createProfileHandler } from "./createProfile.js";
 
 const router = Router();
 
@@ -96,14 +99,18 @@ router.get("/", profilesListRules, handleValidationErrors, async (req, res) => {
       values,
     );
 
+    const { total_pages, links } = constructLinks(req, page, limit, total);
+
     return res.status(200).json({
       status: "success",
       page,
       limit,
       total,
+      total_pages,
+      links,
       data: rows.map(formatProfile),
     });
-  } catch (error) {
+  } catch {
     return res
       .status(500)
       .json({ status: "error", message: "Internal server error" });
@@ -178,6 +185,8 @@ router.get("/search", searchRules, handleValidationErrors, async (req, res) => {
       values,
     );
 
+    const { total_pages, links } = constructLinks(req, page, limit, total);
+
     return res.status(200).json({
       status: "success",
       query: q,
@@ -191,9 +200,112 @@ router.get("/search", searchRules, handleValidationErrors, async (req, res) => {
       page,
       limit,
       total,
+      total_pages,
+      links,
       data: rows.map(formatProfile),
     });
-  } catch (error) {
+  } catch {
+    return res
+      .status(500)
+      .json({ status: "error", message: "Internal server error" });
+  }
+});
+
+router.post(
+  "/",
+  authorize("admin"),
+  createProfileRules,
+  handleValidationErrors,
+  createProfileHandler,
+);
+
+router.get("/export", authorize("admin", "analyst"), async (req, res) => {
+  const {
+    gender,
+    age_group,
+    country_id,
+    min_age,
+    max_age,
+    min_gender_probability,
+    min_country_probability,
+  } = req.query;
+  const sort_by = req.query.sort_by ?? "created_at";
+  const order = (req.query.order ?? "desc").toUpperCase();
+  const sortCol = ALLOWED_SORT_FIELDS[sort_by] ?? "created_at";
+
+  const conditions = [];
+  const values = [];
+
+  if (gender !== undefined) {
+    values.push(gender);
+    conditions.push(`LOWER(gender) = $${values.length}`);
+  }
+  if (age_group !== undefined) {
+    values.push(age_group);
+    conditions.push(`age_group = $${values.length}`);
+  }
+  if (country_id !== undefined) {
+    values.push(country_id.toUpperCase());
+    conditions.push(`country_id = $${values.length}`);
+  }
+  if (min_age !== undefined) {
+    values.push(min_age);
+    conditions.push(`age >= $${values.length}`);
+  }
+  if (max_age !== undefined) {
+    values.push(max_age);
+    conditions.push(`age <= $${values.length}`);
+  }
+  if (min_gender_probability !== undefined) {
+    values.push(min_gender_probability);
+    conditions.push(`gender_probability >= $${values.length}`);
+  }
+  if (min_country_probability !== undefined) {
+    values.push(min_country_probability);
+    conditions.push(`country_probability >= $${values.length}`);
+  }
+
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, gender, gender_probability, age, age_group,
+              country_id, country_name, country_probability, created_at
+       FROM db_profiles ${where}
+       ORDER BY ${sortCol} ${order}`,
+      values,
+    );
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `profiles_${timestamp}.csv`;
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    const header =
+      "id,name,gender,gender_probability,age,age_group,country_id,country_name,country_probability,created_at\n";
+    res.write(header);
+
+    for (const r of rows) {
+      const p = formatProfile(r);
+      const line = [
+        p.id,
+        `"${String(p.name).replace(/"/g, '""')}"`,
+        p.gender ?? "",
+        p.gender_probability ?? "",
+        p.age ?? "",
+        p.age_group ?? "",
+        p.country_id ?? "",
+        `"${String(p.country_name ?? "").replace(/"/g, '""')}"`,
+        p.country_probability ?? "",
+        p.created_at ?? "",
+      ].join(",");
+      res.write(line + "\n");
+    }
+
+    res.end();
+  } catch {
     return res
       .status(500)
       .json({ status: "error", message: "Internal server error" });
