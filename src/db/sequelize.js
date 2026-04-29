@@ -86,13 +86,16 @@ export const connectDB = async () => {
   }
 
   try {
-    // db_profiles: recreated + reseeded on every startup (existing behaviour)
-    await sequelize.models.db_profile.sync({ force: true });
-    await seedProfiles();
-
-    // users + refresh_tokens: created only if they don't exist — never dropped
+    // All tables: created only if they don't exist — never dropped
+    await sequelize.models.db_profile.sync();
     await sequelize.models.user.sync();
     await sequelize.models.refresh_token.sync();
+
+    // Only seed if db_profiles is empty — avoids re-seeding on every cold start
+    const { rows } = await pool.query("SELECT 1 FROM db_profiles LIMIT 1");
+    if (rows.length === 0) {
+      await seedProfiles();
+    }
 
     // Add FK constraint between refresh_tokens and users if not already present
     await pool.query(`
