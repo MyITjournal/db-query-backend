@@ -6,9 +6,39 @@ export function determineAgeGroup(age) {
   return "senior";
 }
 
+/**
+ * Builds the total_pages + links block for paginated responses.
+ * Preserves all existing query params, only swaps out `page`.
+ */
+export function constructLinks(req, page, limit, total) {
+  const total_pages = Math.ceil(total / limit);
+  const base = req.baseUrl + req.path;
+  const params = { ...req.query };
+
+  const makeUrl = (p) => {
+    const q = new URLSearchParams({ ...params, page: p, limit }).toString();
+    return `${base}?${q}`;
+  };
+
+  return {
+    total_pages,
+    links: {
+      self: makeUrl(page),
+      next: page < total_pages ? makeUrl(page + 1) : null,
+      prev: page > 1 ? makeUrl(page - 1) : null,
+    },
+  };
+}
+
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+
 export function getCountryName(countryCode) {
   if (!countryCode) return null;
-  return countries[countryCode]?.name ?? countryCode;
+  try {
+    return regionNames.of(countryCode) ?? countryCode;
+  } catch {
+    return countryCode;
+  }
 }
 
 export function formatProfile(r) {
@@ -29,6 +59,7 @@ export function formatProfile(r) {
 }
 
 export function handleUpstreamError(res, error) {
+  console.error("[handleUpstreamError]", error.message, error.stack);
   const isUpstream =
     error.code === "ECONNABORTED" ||
     (error.response && error.response.status >= 500);
@@ -37,5 +68,3 @@ export function handleUpstreamError(res, error) {
     message: "Server failure",
   });
 }
-
-
