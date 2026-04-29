@@ -5,7 +5,7 @@
 This is a continuation of the db-query-engine started in Stage 2. It is a REST API that serves a pre-seeded database of name profiles with GitHub OAuth authentication, role-based access control, natural language search, CSV export, and JWT token rotation.
 
 - **GitHub Repository:** `https://github.com/MyITjournal/db-query-backend`
-- **Live API Base URL:** `https://db-query-engine-myitjournal8137-upfultli.leapcell.dev`
+- **Live API Base URL:** `https://db-query-backend-myitjournal8137-tp61obq3.leapcell.dev`
 
 ---
 
@@ -576,4 +576,4 @@ curl "http://localhost:3000/api/profiles/search?q=men+in+their+30s+from+the+UK"
 
 ---
 
-Live URL: `https://db-query-engine-myitjournal8137-upfultli.leapcell.dev`
+Live URL: `https://db-query-backend-myitjournal8137-tp61obq3.leapcell.dev`
