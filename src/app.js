@@ -21,8 +21,20 @@ app.get("/", (_req, res) => {
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 60 * 1000,
   limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    status: "error",
+    message: "Too many requests, please try again later",
+  },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  keyGenerator: (req) => req.user?.id ?? req.ip,
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: {
@@ -33,7 +45,7 @@ const authLimiter = rateLimit({
 
 app.use("/auth", authLimiter, authRouter);
 
-app.get("/api/users/me", authenticate, (req, res) => {
+app.get("/api/users/me", authenticate, apiLimiter, (req, res) => {
   return res.status(200).json({
     status: "success",
     data: {
@@ -46,7 +58,7 @@ app.get("/api/users/me", authenticate, (req, res) => {
   });
 });
 
-app.use("/api/profiles", apiVersion, authenticate, profilesRouter);
+app.use("/api/profiles", apiVersion, authenticate, apiLimiter, profilesRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ status: "error", message: "Route not found" });
