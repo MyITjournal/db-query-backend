@@ -90,7 +90,12 @@ Role is embedded in the access token and re-verified from the DB on every authen
 
 ## Rate Limiting
 
-All `/auth/*` routes are limited to **10 requests per 15 minutes** per IP. Exceeding the limit returns:
+| Scope | Limit |
+| ----- | ----- |
+| `/auth/*` routes | 10 requests / minute per IP |
+| All other endpoints | 60 requests / minute per user |
+
+Exceeding either limit returns `429 Too Many Requests`:
 
 ```json
 { "status": "error", "message": "Too many requests, please try again later" }
@@ -384,7 +389,7 @@ JWT_REFRESH_SECRET=another_long_random_secret_32_plus_chars
 node index.js
 ```
 
-The server starts on port `3000`. On startup, Sequelize syncs the `db_profiles` table (drop + recreate) and seeds it with 2026 profiles. The `users` and `refresh_tokens` tables are created safely with `IF NOT EXISTS`.
+The server starts on port `3000`. On first startup, Sequelize creates all tables if they don't exist and seeds `db_profiles` with 2026 profiles. Subsequent startups skip seeding if data already exists.
 
 ---
 
@@ -396,184 +401,4 @@ npm run lint    # eslint src/ index.js server.js
 npm test        # node --test tests/**/*.test.js
 ```
 
----
 
-Live URL: `https://db-query-engine-myitjournal8137-upfultli.leapcell.dev`
-| `limit` | int | 1–50 (default: `10`) |
-
-**Example Requests**
-
-```
-GET /api/profiles
-GET /api/profiles?gender=female&age_group=adult
-GET /api/profiles?country_id=NG&sort_by=age&order=asc&page=2&limit=20
-GET /api/profiles?min_age=25&max_age=40&min_gender_probability=0.9
-```
-
-**Success Response** — `200 OK`
-
-```json
-{
-  "status": "success",
-  "page": 1,
-  "limit": 10,
-  "total": 412,
-  "data": [
-    {
-      "id": "019600e7-...",
-      "name": "ella",
-      "gender": "female",
-      "gender_probability": 0.99,
-      "age": 46,
-      "age_group": "adult",
-      "country_id": "NG",
-      "country_name": "Nigeria",
-      "country_probability": 0.85,
-      "created_at": "2026-04-01T12:00:00.000Z"
-    }
-  ]
-}
-```
-
----
-
-### `GET /api/profiles/search`
-
-**Query Parameters**
-
-| Parameter | Type   | Required | Constraints           |
-| --------- | ------ | -------- | --------------------- |
-| `q`       | string | Yes      | max 500 characters    |
-| `page`    | int    | No       | ≥ 1 (default: `1`)    |
-| `limit`   | int    | No       | 1–100 (default: `10`) |
-
-**Example Requests**
-
-```
-GET /api/profiles/search?q=women over 30 from nigeria
-GET /api/profiles/search?q=adult males from the US
-GET /api/profiles/search?q=men in their 40s from germany
-GET /api/profiles/search?q=elderly women from brazil
-```
-
-> **Example — filter intersection:** `GET /api/profiles/search?q=young teenagers from Nigeria`
->
-> Two independent filters are parsed from this query:
->
-> - `young` → `min_age: 16, max_age: 24`
-> - `teenagers` → `age_group: "teenager"` (database rows where `age` is 13–19)
->
-> Applied together, the effective age window becomes **16–19** — the overlap between the `young` age cap (≤ 24) and the `teenager` age group floor (≥ 13), further bounded by the `teenager` ceiling (≤ 19). Only Nigerian profiles in that 16–19 range are returned.
-
-**Success Response** — `200 OK`
-
-```json
-{
-  "status": "success",
-  "query": "women over 30 from nigeria",
-  "parsed": {
-    "gender": "female",
-    "min_age": 30,
-    "country_id": "NG"
-  },
-  "page": 1,
-  "limit": 10,
-  "total": 27,
-  "data": [ { ...profile }, ... ]
-}
-```
-
----
-
-## Profile Fields
-
-| Field                 | Type   | Description                                                         |
-| --------------------- | ------ | ------------------------------------------------------------------- |
-| `id`                  | string | UUID v7                                                             |
-| `name`                | string | Profile name                                                        |
-| `gender`              | string | `male` or `female`                                                  |
-| `gender_probability`  | number | Confidence score (0–1)                                              |
-| `age`                 | number | Estimated age                                                       |
-| `age_group`           | string | `child` (0–12), `teenager` (13–19), `adult` (20–59), `senior` (60+) |
-| `country_id`          | string | ISO 3166-1 alpha-2 country code                                     |
-| `country_name`        | string | Full country name                                                   |
-| `country_probability` | number | Country confidence score (0–1), rounded to 2 d.p.                   |
-| `created_at`          | string | UTC ISO 8601 timestamp                                              |
-
----
-
-## Error Responses
-
-All error responses follow the same structure:
-
-```json
-{ "status": "error", "message": "<error description>" }
-```
-
-| Status | Condition                                                   |
-| ------ | ----------------------------------------------------------- |
-| `400`  | Missing or empty required parameter                         |
-| `401`  | Missing or invalid authentication token                     |
-| `403`  | Forbidden — insufficient role permissions                   |
-| `404`  | Profile not found                                           |
-| `422`  | Invalid parameter type (value present but fails validation) |
-| `500`  | Internal server error                                       |
-| `502`  | Upstream API failure (genderize / agify / nationalize)      |
-
----
-
-## Running Locally
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/MyITjournal/db-query-engine.git
-cd your-folder-name
-
-# 2. Install dependencies
-npm install
-
-# 3. Configure environment variables
-```
-
-Create a `.env` file in the project root:
-
-```env
-DATABASE_URL=postgresql://postgres:your_password@localhost:5432/your_db_name
-DATABASE_SSL=false
-
-GITHUB_CLIENT_ID=your_github_app_client_id
-GITHUB_CLIENT_SECRET=your_github_app_client_secret
-GITHUB_CALLBACK_URL=http://localhost:3000/auth/github/callback
-
-JWT_ACCESS_SECRET=some_long_random_secret_32_plus_chars
-JWT_REFRESH_SECRET=another_long_random_secret_32_plus_chars
-```
-
-```bash
-# 4. Start the server
-node index.js
-```
-
-The server starts on port `3000`. On every start, Sequelize drops and recreates the `db_profiles` table, then seeds it with the 2026 profiles from `seed_profiles.json`.
-
----
-
-**Testing:**
-
-```bash
-# Health check
-curl http://localhost:3000/
-
-# List all profiles (paginated)
-curl "http://localhost:3000/api/profiles"
-
-# Filter profiles
-curl "http://localhost:3000/api/profiles?gender=female&age_group=adult&country_id=NG"
-
-# Natural language search
-curl "http://localhost:3000/api/profiles/search?q=men+in+their+30s+from+the+UK"
-```
-
----
-
-Live URL: `https://db-query-backend-myitjournal8137-tp61obq3.leapcell.dev`
