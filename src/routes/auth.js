@@ -59,8 +59,28 @@ async function getGitHubUser(githubAccessToken) {
   return data;
 }
 
-router.get("/github", (_req, res) => {
-  const state = jwt.sign({}, config.JWT_ACCESS_SECRET, { expiresIn: 600 });
+router.get("/github", (req, res) => {
+  const { redirect_uri } = req.query;
+  const statePayload = {};
+
+  if (redirect_uri) {
+    const allowedOrigins = config.FRONTEND_URL
+      ? config.FRONTEND_URL.split(",").map((u) => u.trim())
+      : [];
+    const isAllowed = allowedOrigins.some((origin) =>
+      redirect_uri.startsWith(origin),
+    );
+    if (!isAllowed) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Invalid redirect_uri" });
+    }
+    statePayload.redirect_uri = redirect_uri;
+  }
+
+  const state = jwt.sign(statePayload, config.JWT_ACCESS_SECRET, {
+    expiresIn: 600,
+  });
 
   const params = new URLSearchParams({
     client_id: config.GITHUB_CLIENT_ID,
@@ -81,8 +101,9 @@ router.get("/github/callback", async (req, res) => {
       .json({ status: "error", message: "Missing code or state" });
   }
 
+  let decoded;
   try {
-    jwt.verify(state, config.JWT_ACCESS_SECRET);
+    decoded = jwt.verify(state, config.JWT_ACCESS_SECRET);
   } catch {
     return res
       .status(400)
@@ -141,6 +162,13 @@ router.get("/github/callback", async (req, res) => {
       `INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES ($1, $2, $3)`,
       [jti, user.id, refreshExpiresAt],
     );
+
+    if (decoded.redirect_uri) {
+      const url = new URL(decoded.redirect_uri);
+      url.searchParams.set("access_token", accessToken);
+      url.searchParams.set("refresh_token", refreshToken);
+      return res.redirect(url.toString());
+    }
 
     return res.status(200).json({
       status: "success",
