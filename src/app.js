@@ -17,7 +17,7 @@ app.use((_req, res, next) => {
 });
 
 app.get("/", (_req, res) => {
-  res.json({ status: "OK", message: "Name Classification API is running" });
+  res.json({ status: "OK", message: "Insighta Labs+ API is running" });
 });
 
 const authLimiter = rateLimit({
