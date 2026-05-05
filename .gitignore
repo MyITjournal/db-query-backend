@@ -4,3 +4,4 @@ node_modules/
 *.mjs
 *_SUMMARY.md
 *_LOG.md
+.csv

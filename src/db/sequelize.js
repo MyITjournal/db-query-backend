@@ -34,6 +34,20 @@ sequelize.define(
       { fields: ["age_group"], name: "db_profiles_age_group_idx" },
       { fields: ["country_id"], name: "db_profiles_country_id_idx" },
       { fields: ["age"], name: "db_profiles_age_idx" },
+      { fields: ["created_at"], name: "db_profiles_created_at_idx" },
+      { fields: ["gender_probability"], name: "db_profiles_gender_prob_idx" },
+      {
+        fields: ["gender", "country_id"],
+        name: "db_profiles_gender_country_idx",
+      },
+      {
+        fields: ["gender", "age_group"],
+        name: "db_profiles_gender_age_group_idx",
+      },
+      {
+        fields: ["country_id", "age_group"],
+        name: "db_profiles_country_age_group_idx",
+      },
     ],
   },
 );
