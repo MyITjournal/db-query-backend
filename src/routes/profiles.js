@@ -9,8 +9,9 @@ import {
   handleValidationErrors,
 } from "../helpers/validators.js";
 import { authorize } from "../middleware/authorize.js";
-import { createProfileHandler } from "./createProfile.js";
 import { queryCache, buildCacheKey } from "../helpers/queryCache.js";
+import { createProfileHandler } from "./createProfile.js";
+import { handleUpload, importProfilesHandler } from "./importProfiles.js";
 
 const router = Router();
 
@@ -148,7 +149,7 @@ router.get("/search", searchRules, handleValidationErrors, async (req, res) => {
       .json({ status: "error", message: "Invalid query parameters" });
   }
 
-   const searchCacheKey = buildCacheKey("search", { ...parsed, page, limit });
+  const searchCacheKey = buildCacheKey("search", { ...parsed, page, limit });
   const cachedSearch = queryCache.get(searchCacheKey);
   if (cachedSearch) return res.status(200).json(cachedSearch);
 
@@ -236,6 +237,8 @@ router.post(
   handleValidationErrors,
   createProfileHandler,
 );
+
+router.post("/import", authorize("admin"), handleUpload, importProfilesHandler);
 
 router.get("/export", authorize("admin", "analyst"), async (req, res) => {
   const {
