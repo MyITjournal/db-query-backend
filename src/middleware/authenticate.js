@@ -1,6 +1,23 @@
 import { verifyAccessToken } from "../helpers/tokens.js";
 import pool from "../db/index.js";
 
+const USER_CACHE_TTL = 60 * 1000;
+const userCache = new Map();
+
+function getCachedUser(id) {
+  const entry = userCache.get(id);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    userCache.delete(id);
+    return null;
+  }
+  return entry.user;
+}
+
+function setCachedUser(id, user) {
+  userCache.set(id, { user, expiresAt: Date.now() + USER_CACHE_TTL });
+}
+
 export async function authenticate(req, res, next) {
   const authHeader = req.headers["authorization"];
 
@@ -22,6 +39,17 @@ export async function authenticate(req, res, next) {
   }
 
   try {
+    const cached = getCachedUser(payload.sub);
+    if (cached) {
+      if (!cached.is_active) {
+        return res
+          .status(403)
+          .json({ status: "error", message: "Account is inactive" });
+      }
+      req.user = cached;
+      return next();
+    }
+
     const { rows } = await pool.query(
       "SELECT id, role, username, email, avatar_url, is_active FROM users WHERE id = $1",
       [payload.sub],
@@ -39,6 +67,7 @@ export async function authenticate(req, res, next) {
         .json({ status: "error", message: "Account is inactive" });
     }
 
+    setCachedUser(payload.sub, rows[0]);
     req.user = rows[0];
     next();
   } catch {
