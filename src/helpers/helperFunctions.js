@@ -1,6 +1,6 @@
 export function determineAgeGroup(age) {
   if (age === null || age === undefined) return null;
-  if (age > 0 && age <= 12) return "child";
+  if (age >= 0 && age <= 12) return "child";
   if (age >= 13 && age <= 19) return "teenager";
   if (age >= 20 && age <= 59) return "adult";
   return "senior";
@@ -22,6 +22,8 @@ export function constructLinks(req, page, limit, total) {
       self: makeUrl(page),
       next: page < total_pages ? makeUrl(page + 1) : null,
       prev: page > 1 ? makeUrl(page - 1) : null,
+      first: makeUrl(1),
+      last: makeUrl(total_pages || 1),
     },
   };
 }
