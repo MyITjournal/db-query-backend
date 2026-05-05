@@ -65,15 +65,21 @@ router.get("/github", (req, res) => {
 
   if (redirect_uri) {
     const allowedOrigins = config.FRONTEND_URL
-      ? config.FRONTEND_URL.split(",").map((u) => u.trim())
+      ? config.FRONTEND_URL.split(",")
+          .map((u) => u.trim())
+          .filter(Boolean)
       : [];
     const isAllowed = allowedOrigins.some((origin) =>
       redirect_uri.startsWith(origin),
     );
     if (!isAllowed) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Invalid redirect_uri" });
+      console.warn(
+        `[auth/github] Rejected redirect_uri="${redirect_uri}" — not in FRONTEND_URL allowlist (${allowedOrigins.join(", ") || "empty"})`,
+      );
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid redirect_uri",
+      });
     }
     statePayload.redirect_uri = redirect_uri;
   }
