@@ -1,9 +1,10 @@
 import express from "express";
-import { rateLimit } from "express-rate-limit";
+import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import profilesRouter from "./routes/profiles.js";
 import authRouter from "./routes/auth.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { apiVersion } from "./middleware/apiVersion.js";
+import config from "./config/index.js";
 
 const app = express();
 
@@ -11,8 +12,28 @@ app.set("trust proxy", 1);
 
 app.use(express.json());
 
-app.use((_req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+const allowedOrigins = config.FRONTEND_URL
+  ? config.FRONTEND_URL.split(",").map((u) => u.trim())
+  : [];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowed =
+    allowedOrigins.length === 0 || (origin && allowedOrigins.includes(origin));
+
+  if (allowed) {
+    res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Authorization, Content-Type, X-API-Version",
+    );
+    if (allowedOrigins.length > 0) res.setHeader("Vary", "Origin");
+  }
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
   next();
 });
 
@@ -34,7 +55,7 @@ const authLimiter = rateLimit({
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 60,
-  keyGenerator: (req) => req.user?.id ?? req.ip,
+  keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req),
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: {
