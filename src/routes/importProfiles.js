@@ -16,8 +16,7 @@ const VALID_AGE_GROUPS = new Set(["child", "teenager", "adult", "senior"]);
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, tmpdir()),
-  filename: (_req, _file, cb) =>
-    cb(null, `import_${Date.now()}_${Math.random().toString(36).slice(2)}.csv`),
+  filename: (_req, _file, cb) => cb(null, `import_${uuidv7()}.csv`),
 });
 
 const upload = multer({
@@ -64,7 +63,7 @@ function validateRow(record) {
   }
 
   if (!VALID_GENDERS.has(gender)) {
-    return { valid: false, reason: "missing_fields" };
+    return { valid: false, reason: "invalid_gender" };
   }
 
   let gender_probability = null;
@@ -167,6 +166,21 @@ export async function importProfilesHandler(req, res) {
     summary.reasons[reason] = (summary.reasons[reason] ?? 0) + count;
   };
 
+  const normalizeReasonsForResponse = (reasons) => {
+    const normalized = { ...reasons };
+    const foldedCount =
+      (normalized.invalid_gender ?? 0) + (normalized.malformed_row ?? 0);
+
+    if (foldedCount > 0) {
+      normalized.missing_fields =
+        (normalized.missing_fields ?? 0) + foldedCount;
+    }
+
+    delete normalized.invalid_gender;
+    delete normalized.malformed_row;
+    return normalized;
+  };
+
   try {
     const parser = createReadStream(filePath).pipe(
       parse({
@@ -181,7 +195,7 @@ export async function importProfilesHandler(req, res) {
 
     parser.on("skip", () => {
       summary.total_rows += 1;
-      recordSkip("missing_fields");
+      recordSkip("malformed_row");
     });
 
     let batch = [];
@@ -211,7 +225,11 @@ export async function importProfilesHandler(req, res) {
       if (duplicates > 0) recordSkip("duplicate_name", duplicates);
     }
 
-    return res.status(200).json({ status: "success", ...summary });
+    return res.status(200).json({
+      status: "success",
+      ...summary,
+      reasons: normalizeReasonsForResponse(summary.reasons),
+    });
   } finally {
     await unlink(filePath).catch(() => {});
   }
