@@ -9,7 +9,9 @@ import {
   handleValidationErrors,
 } from "../helpers/validators.js";
 import { authorize } from "../middleware/authorize.js";
+import { queryCache, buildCacheKey } from "../helpers/queryCache.js";
 import { createProfileHandler } from "./createProfile.js";
+import { handleUpload, importProfilesHandler } from "./importProfiles.js";
 
 const router = Router();
 
@@ -78,13 +80,23 @@ router.get("/", profilesListRules, handleValidationErrors, async (req, res) => {
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  try {
-    const countResult = await pool.query(
-      `SELECT COUNT(*) FROM db_profiles ${where}`,
-      values,
-    );
-    const total = parseInt(countResult.rows[0].count, 10);
+  const cacheKey = buildCacheKey("profiles", {
+    gender,
+    age_group,
+    country_id,
+    min_age,
+    max_age,
+    min_gender_probability,
+    min_country_probability,
+    sort_by,
+    order,
+    page,
+    limit,
+  });
+  const cached = queryCache.get(cacheKey);
+  if (cached) return res.status(200).json(cached);
 
+  try {
     values.push(limit);
     const limitPh = `$${values.length}`;
     values.push(offset);
@@ -92,16 +104,19 @@ router.get("/", profilesListRules, handleValidationErrors, async (req, res) => {
 
     const { rows } = await pool.query(
       `SELECT id, name, gender, gender_probability, age, age_group,
-              country_id, country_name, country_probability, created_at
+              country_id, country_name, country_probability, created_at,
+              COUNT(*) OVER() AS total_count
        FROM db_profiles ${where}
        ORDER BY ${sortCol} ${order}
        LIMIT ${limitPh} OFFSET ${offsetPh}`,
       values,
     );
 
+    const total = rows.length > 0 ? parseInt(rows[0].total_count, 10) : 0;
+
     const { total_pages, links } = constructLinks(req, page, limit, total);
 
-    return res.status(200).json({
+    const body = {
       status: "success",
       page,
       limit,
@@ -109,7 +124,9 @@ router.get("/", profilesListRules, handleValidationErrors, async (req, res) => {
       total_pages,
       links,
       data: rows.map(formatProfile),
-    });
+    };
+    queryCache.set(cacheKey, body);
+    return res.status(200).json(body);
   } catch {
     return res
       .status(500)
@@ -126,12 +143,15 @@ router.get("/search", searchRules, handleValidationErrors, async (req, res) => {
 
   const parsed = parseNaturalLanguageQuery(q);
 
-  // Nothing was interpretable — return error per spec
   if (Object.keys(parsed).length === 0) {
     return res
       .status(400)
       .json({ status: "error", message: "Invalid query parameters" });
   }
+
+  const searchCacheKey = buildCacheKey("search", { ...parsed, page, limit });
+  const cachedSearch = queryCache.get(searchCacheKey);
+  if (cachedSearch) return res.status(200).json(cachedSearch);
 
   const conditions = [];
   const values = [];
@@ -165,12 +185,6 @@ router.get("/search", searchRules, handleValidationErrors, async (req, res) => {
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   try {
-    const countResult = await pool.query(
-      `SELECT COUNT(*) FROM db_profiles ${where}`,
-      values,
-    );
-    const total = parseInt(countResult.rows[0].count, 10);
-
     values.push(limit);
     const limitPh = `$${values.length}`;
     values.push(offset);
@@ -178,16 +192,19 @@ router.get("/search", searchRules, handleValidationErrors, async (req, res) => {
 
     const { rows } = await pool.query(
       `SELECT id, name, gender, gender_probability, age, age_group,
-              country_id, country_name, country_probability, created_at
+              country_id, country_name, country_probability, created_at,
+              COUNT(*) OVER() AS total_count
        FROM db_profiles ${where}
        ORDER BY created_at DESC
        LIMIT ${limitPh} OFFSET ${offsetPh}`,
       values,
     );
 
+    const total = rows.length > 0 ? parseInt(rows[0].total_count, 10) : 0;
+
     const { total_pages, links } = constructLinks(req, page, limit, total);
 
-    return res.status(200).json({
+    const searchBody = {
       status: "success",
       query: q,
       parsed: {
@@ -203,7 +220,9 @@ router.get("/search", searchRules, handleValidationErrors, async (req, res) => {
       total_pages,
       links,
       data: rows.map(formatProfile),
-    });
+    };
+    queryCache.set(searchCacheKey, searchBody);
+    return res.status(200).json(searchBody);
   } catch {
     return res
       .status(500)
@@ -218,6 +237,8 @@ router.post(
   handleValidationErrors,
   createProfileHandler,
 );
+
+router.post("/import", authorize("admin"), handleUpload, importProfilesHandler);
 
 router.get("/export", authorize("admin", "analyst"), async (req, res) => {
   const {
@@ -268,47 +289,60 @@ router.get("/export", authorize("admin", "analyst"), async (req, res) => {
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
+  const BATCH_SIZE = 500;
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `profiles_${timestamp}.csv`;
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+  const header =
+    "id,name,gender,gender_probability,age,age_group,country_id,country_name,country_probability,created_at\n";
+  res.write(header);
+
   try {
-    const { rows } = await pool.query(
-      `SELECT id, name, gender, gender_probability, age, age_group,
-              country_id, country_name, country_probability, created_at
-       FROM db_profiles ${where}
-       ORDER BY ${sortCol} ${order}`,
-      values,
-    );
+    let offset = 0;
+    let fetched;
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `profiles_${timestamp}.csv`;
+    do {
+      const batchValues = [...values, BATCH_SIZE, offset];
+      const limitPh = `$${batchValues.length - 1}`;
+      const offsetPh = `$${batchValues.length}`;
 
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      const { rows } = await pool.query(
+        `SELECT id, name, gender, gender_probability, age, age_group,
+                country_id, country_name, country_probability, created_at
+         FROM db_profiles ${where}
+         ORDER BY ${sortCol} ${order}
+         LIMIT ${limitPh} OFFSET ${offsetPh}`,
+        batchValues,
+      );
 
-    const header =
-      "id,name,gender,gender_probability,age,age_group,country_id,country_name,country_probability,created_at\n";
-    res.write(header);
+      for (const r of rows) {
+        const p = formatProfile(r);
+        const line = [
+          p.id,
+          `"${String(p.name).replace(/"/g, '""')}"`,
+          p.gender ?? "",
+          p.gender_probability ?? "",
+          p.age ?? "",
+          p.age_group ?? "",
+          p.country_id ?? "",
+          `"${String(p.country_name ?? "").replace(/"/g, '""')}"`,
+          p.country_probability ?? "",
+          p.created_at ?? "",
+        ].join(",");
+        res.write(line + "\n");
+      }
 
-    for (const r of rows) {
-      const p = formatProfile(r);
-      const line = [
-        p.id,
-        `"${String(p.name).replace(/"/g, '""')}"`,
-        p.gender ?? "",
-        p.gender_probability ?? "",
-        p.age ?? "",
-        p.age_group ?? "",
-        p.country_id ?? "",
-        `"${String(p.country_name ?? "").replace(/"/g, '""')}"`,
-        p.country_probability ?? "",
-        p.created_at ?? "",
-      ].join(",");
-      res.write(line + "\n");
-    }
+      fetched = rows.length;
+      offset += fetched;
+    } while (fetched === BATCH_SIZE);
 
     res.end();
   } catch {
-    return res
-      .status(500)
-      .json({ status: "error", message: "Internal server error" });
+    res.end();
   }
 });
 

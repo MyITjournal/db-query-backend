@@ -6,6 +6,7 @@ This is a continuation of the db-query-engine started in Stage 2. It is a REST A
 
 - **GitHub Repository:** `https://github.com/MyITjournal/db-query-backend`
 - **Live API Base URL:** `https://db-query-backend-myitjournal8137-tp61obq3.leapcell.dev`
+- **Public URL:** `https://db-query-webportal-myitjournals-projects.vercel.app`
 
 ---
 
@@ -90,9 +91,9 @@ Role is embedded in the access token and re-verified from the DB on every authen
 
 ## Rate Limiting
 
-| Scope | Limit |
-| ----- | ----- |
-| `/auth/*` routes | 10 requests / minute per IP |
+| Scope               | Limit                         |
+| ------------------- | ----------------------------- |
+| `/auth/*` routes    | 10 requests / minute per IP   |
 | All other endpoints | 60 requests / minute per user |
 
 Exceeding either limit returns `429 Too Many Requests`:
@@ -400,5 +401,3 @@ npm start       # node index.js
 npm run lint    # eslint src/ index.js server.js
 npm test        # node --test tests/**/*.test.js
 ```
-
-

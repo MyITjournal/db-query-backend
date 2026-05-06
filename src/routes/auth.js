@@ -65,15 +65,21 @@ router.get("/github", (req, res) => {
 
   if (redirect_uri) {
     const allowedOrigins = config.FRONTEND_URL
-      ? config.FRONTEND_URL.split(",").map((u) => u.trim())
+      ? config.FRONTEND_URL.split(",")
+          .map((u) => u.trim())
+          .filter(Boolean)
       : [];
     const isAllowed = allowedOrigins.some((origin) =>
       redirect_uri.startsWith(origin),
     );
     if (!isAllowed) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Invalid redirect_uri" });
+      console.warn(
+        `[auth/github] Rejected redirect_uri="${redirect_uri}" — not in FRONTEND_URL allowlist (${allowedOrigins.join(", ") || "empty"})`,
+      );
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid redirect_uri",
+      });
     }
     statePayload.redirect_uri = redirect_uri;
   }
@@ -110,40 +116,6 @@ router.get("/github/callback", async (req, res) => {
       .json({ status: "error", message: "Invalid or expired state" });
   }
 
-  if (code === "test_code") {
-    try {
-      const { rows } = await pool.query(
-        `SELECT id, username, role, is_active FROM users WHERE role = 'admin' AND is_active = true LIMIT 1`,
-      );
-
-      if (rows.length === 0) {
-        return res
-          .status(404)
-          .json({ status: "error", message: "No seeded admin user found" });
-      }
-
-      const user = rows[0];
-      const { accessToken, refreshToken, jti, refreshExpiresAt } =
-        signTokens(user);
-
-      await pool.query(
-        `INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES ($1, $2, $3)`,
-        [jti, user.id, refreshExpiresAt],
-      );
-
-      return res.status(200).json({
-        status: "success",
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-    } catch (err) {
-      console.error("[auth/github/callback test_code]", err.message);
-      return res
-        .status(500)
-        .json({ status: "error", message: "Internal server error" });
-    }
-  }
-
   try {
     const ghToken = await exchangeCodeWithGitHub(code);
     const githubUser = await getGitHubUser(ghToken);
@@ -158,10 +130,7 @@ router.get("/github/callback", async (req, res) => {
     const { accessToken, refreshToken, jti, refreshExpiresAt } =
       signTokens(user);
 
-    await pool.query(
-      `INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES ($1, $2, $3)`,
-      [jti, user.id, refreshExpiresAt],
-    );
+    await storeRefreshToken(pool, jti, user.id, refreshExpiresAt);
 
     if (decoded.redirect_uri) {
       const url = new URL(decoded.redirect_uri);
@@ -211,10 +180,7 @@ router.post("/cli/token", async (req, res) => {
     const { accessToken, refreshToken, jti, refreshExpiresAt } =
       signTokens(user);
 
-    await pool.query(
-      `INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES ($1, $2, $3)`,
-      [jti, user.id, refreshExpiresAt],
-    );
+    await storeRefreshToken(pool, jti, user.id, refreshExpiresAt);
 
     return res.status(200).json({
       status: "success",

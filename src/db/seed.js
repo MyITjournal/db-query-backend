@@ -12,43 +12,46 @@ export const seedProfiles = async () => {
 
   console.log(`Seeding ${profiles.length} profiles...`);
 
-  let updatedProfile = 0;
-  let skippedProfile = 0;
+  const BATCH_SIZE = 200;
+  let inserted = 0;
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    for (const profile of profiles) {
+    for (let i = 0; i < profiles.length; i += BATCH_SIZE) {
+      const chunk = profiles.slice(i, i + BATCH_SIZE);
+      const placeholders = chunk
+        .map((_, j) => {
+          const b = j * 9;
+          return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},NOW())`;
+        })
+        .join(", ");
+      const vals = chunk.flatMap((p) => [
+        uuidv7(),
+        p.name,
+        p.gender,
+        p.gender_probability,
+        p.age,
+        p.age_group,
+        p.country_id,
+        p.country_name,
+        p.country_probability,
+      ]);
       const result = await client.query(
         `INSERT INTO db_profiles
            (id, name, gender, gender_probability, age, age_group,
             country_id, country_name, country_probability, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         VALUES ${placeholders}
          ON CONFLICT (name) DO NOTHING`,
-        [
-          uuidv7(),
-          profile.name,
-          profile.gender,
-          profile.gender_probability,
-          profile.age,
-          profile.age_group,
-          profile.country_id,
-          profile.country_name,
-          profile.country_probability,
-        ],
+        vals,
       );
-
-      if (result.rowCount > 0) {
-        updatedProfile++;
-      } else {
-        skippedProfile++;
-      }
+      inserted += result.rowCount;
     }
 
     await client.query("COMMIT");
     console.log(
-      `Seeding completed. Updated: ${updatedProfile} | Skipped (already exists): ${skippedProfile}`,
+      `Seeding completed. Inserted: ${inserted} | Skipped (already exists): ${profiles.length - inserted}`,
     );
   } catch (err) {
     await client.query("ROLLBACK");
