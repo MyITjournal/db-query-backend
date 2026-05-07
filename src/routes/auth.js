@@ -1,10 +1,22 @@
 import { Router } from "express";
+import { randomBytes, createHash } from "node:crypto";
 import axios from "axios";
 import { v7 as uuidv7 } from "uuid";
 import jwt from "jsonwebtoken";
 import config from "../config/index.js";
 import pool from "../db/index.js";
 import { signTokens, verifyRefreshToken } from "../helpers/tokens.js";
+
+const authCodeStore = new Map();
+const AUTH_CODE_TTL_MS = 5 * 60 * 1_000;
+
+function pruneAuthCodes() {
+  const now = Date.now();
+  for (const [key, entry] of authCodeStore) {
+    if (now > entry.expiresAt) authCodeStore.delete(key);
+  }
+}
+setInterval(pruneAuthCodes, 60_000).unref();
 
 const router = Router();
 
@@ -60,7 +72,12 @@ async function getGitHubUser(githubAccessToken) {
 }
 
 router.get("/github", (req, res) => {
-  const { redirect_uri } = req.query;
+  const {
+    redirect_uri,
+    state: cliState,
+    code_challenge,
+    code_challenge_method,
+  } = req.query;
   const statePayload = {};
 
   if (redirect_uri) {
@@ -82,6 +99,20 @@ router.get("/github", (req, res) => {
       });
     }
     statePayload.redirect_uri = redirect_uri;
+  }
+
+  if (cliState) {
+    statePayload.cli_state = cliState;
+  }
+
+  if (code_challenge) {
+    if (code_challenge_method !== "S256") {
+      return res.status(400).json({
+        status: "error",
+        message: "Only S256 code_challenge_method is supported",
+      });
+    }
+    statePayload.code_challenge = code_challenge;
   }
 
   const state = jwt.sign(statePayload, config.JWT_ACCESS_SECRET, {
@@ -127,6 +158,21 @@ router.get("/github/callback", async (req, res) => {
         .json({ status: "error", message: "Account is inactive" });
     }
 
+    if (decoded.code_challenge && decoded.redirect_uri) {
+      const authCode = randomBytes(32).toString("base64url");
+      authCodeStore.set(authCode, {
+        user,
+        code_challenge: decoded.code_challenge,
+        expiresAt: Date.now() + AUTH_CODE_TTL_MS,
+      });
+
+      const callbackUrl = new URL(decoded.redirect_uri);
+      callbackUrl.searchParams.set("auth_code", authCode);
+      if (decoded.cli_state)
+        callbackUrl.searchParams.set("state", decoded.cli_state);
+      return res.redirect(callbackUrl.toString());
+    }
+
     const { accessToken, refreshToken, jti, refreshExpiresAt } =
       signTokens(user);
 
@@ -157,26 +203,49 @@ router.get("/github/callback", async (req, res) => {
 });
 
 router.post("/cli/token", async (req, res) => {
-  const { code, code_verifier } = req.body;
+  const { auth_code, code_verifier } = req.body;
 
-  if (!code || !code_verifier) {
+  if (!auth_code || !code_verifier) {
     return res.status(400).json({
       status: "error",
-      message: "code and code_verifier are required",
+      message: "auth_code and code_verifier are required",
     });
   }
 
+  const entry = authCodeStore.get(auth_code);
+  if (!entry) {
+    return res
+      .status(400)
+      .json({ status: "error", message: "Invalid or expired auth code" });
+  }
+
+  authCodeStore.delete(auth_code);
+
+  if (Date.now() > entry.expiresAt) {
+    return res
+      .status(400)
+      .json({ status: "error", message: "Auth code has expired" });
+  }
+
+  const computedChallenge = createHash("sha256")
+    .update(code_verifier)
+    .digest("base64url");
+
+  if (computedChallenge !== entry.code_challenge) {
+    return res
+      .status(400)
+      .json({ status: "error", message: "Invalid code_verifier" });
+  }
+
+  const { user } = entry;
+
+  if (!user.is_active) {
+    return res
+      .status(403)
+      .json({ status: "error", message: "Account is inactive" });
+  }
+
   try {
-    const ghToken = await exchangeCodeWithGitHub(code, code_verifier);
-    const githubUser = await getGitHubUser(ghToken);
-    const user = await upsertUser(githubUser);
-
-    if (!user.is_active) {
-      return res
-        .status(403)
-        .json({ status: "error", message: "Account is inactive" });
-    }
-
     const { accessToken, refreshToken, jti, refreshExpiresAt } =
       signTokens(user);
 
@@ -190,8 +259,8 @@ router.post("/cli/token", async (req, res) => {
     });
   } catch {
     return res
-      .status(502)
-      .json({ status: "error", message: "GitHub authentication failed" });
+      .status(500)
+      .json({ status: "error", message: "Internal server error" });
   }
 });
 
